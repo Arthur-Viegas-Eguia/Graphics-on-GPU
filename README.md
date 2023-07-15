@@ -4,15 +4,15 @@ More than running computer graphics on the GPU, this project also contains shade
 
 To run  on mac just type
 ```
-glslc 600shader.vert -o 600vert.spv
-glslc 600shader.frag -o 600frag.spv
-clang 600mainSpecular.c -lglfw -lvulkan
+glslc 590shader.vert -o 590vert.spv
+glslc 590shader.frag -o 590frag.spv
+clang 590mainDiffuse.c -lglfw -lvulkan
 ```
 Or on Linux 
 ```
-/mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 600shader.vert -o 600vert.spv
-/mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 600shader.frag -o 600frag.spv
-clang 600mainSpecular.c -lglfw -lvulkan
+/mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 590shader.vert -o 590vert.spv
+/mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 590shader.frag -o 590frag.spv
+clang 590mainDiffuse.c -lglfw -lvulkan -lm
 ```
 You might need to change the 1.3.216 to the version of Vulkan running on your computer. To move the character, use W,A,S,D
 
