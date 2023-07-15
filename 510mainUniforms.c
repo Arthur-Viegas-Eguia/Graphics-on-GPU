@@ -3,30 +3,35 @@
 
 /*
 
-This file is the third step in my Vulkan tutorials, which are based on the 2020 
+This file is the fifth step in my Vulkan tutorials, which are based on the 2020 
 April version of Alexander Overvoorde's Vulkan tutorial at 
     https://www.vulkan-tutorial.com/
 in consultation with the Vulkan Programming Guide by Graham Sellers and other 
-sources. In this step, we draw two meshes in a simple way and without any 
-animation. To get there, we have to build a scene using a shader program and 
-meshes, where each mesh consists of a vertex buffer and an index buffer. 
-Moreover, we have to write a substantial amount of code to 'connect' the swap 
-chain to this scene. Code that is new, compared to the preceding tutorial, is 
-marked 'New' in the comments.
+sources. In this step, we introduce uniforms, such as a 4x4 modeling matrix,  
+that have body-specific values. Because there may be many bodies, we need to 
+maintain arrays of these uniforms. An annoying wrinkle is that the GPU has rules 
+about how these arrays are aligned in memory. Anyway, the resulting program 
+rotates one of the meshes, but not the other, while the camera revolves around 
+both of them. Code that is new, compared to the preceding tutorial, is marked 
+'New' in the comments.
+
+(By the way, a Vulkan feature called 'push constants' might appear ideal for 
+this purpose, but changing push constant values requires rebuilding the command 
+buffers, which I don't want to do on each animation frame.)
 
 On macOS, make sure that NUMDEVICEEXT below is 2, and then compile with 
-    clang 460mainMeshes.c -lglfw -lvulkan
+    clang 500mainUniforms.c -lglfw -lvulkan
 You might also need to compile the shaders with 
-    glslc 460shader.vert -o 460vert.spv
-    glslc 460shader.frag -o 460frag.spv
+    glslc 500shader.vert -o 500vert.spv
+    glslc 480shader.frag -o 480frag.spv
 Then run the program with 
     ./a.out
 
 On Linux, make sure that NUMDEVICEEXT below is 1, and then compile with 
-    clang 460mainMeshes.c -lglfw -lvulkan -lm
+    clang 500mainUniforms.c -lglfw -lvulkan -lm
 You might also need to compile the shaders with 
-    /mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 460shader.vert -o 460vert.spv
-    /mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 460shader.frag -o 460frag.spv
+    /mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 500shader.vert -o 500vert.spv
+    /mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 480shader.frag -o 480frag.spv
 (You might have to change the SDK version number to match your installation.) 
 Then run the program with 
     ./a.out
@@ -93,83 +98,324 @@ vulVulkan vul;
 #include "450image.c"
 #include "450swap.c"
 swapChain swap;
-
-/* New: Two files. */
 #include "460shader.c"
+#include "460mesh.c"
+#include "480uniform.c"
+#include "480description.c"
 #include "470vector.c"
-#include "470mesh.c"
-#include "470mesh2D.c"
-#include "470mesh3D.c"
-#include "470vesh.c"
+#include "490matrix.c"
+#include "490isometry.c"
 
 
 
 /*** ARTWORK ******************************************************************/
 
-/* New: This entire section, in which we load our artwork. Here's the variable 
-to hold the shader program. */
+/* Here's the variable to hold the shader program. */
 shaProgram shaProg;
 
 /* Our meshes are assumed to use a single attribute style: three attributes of 
 dimensions 3 (xyz), 3 (rgb), 2 (st). */
-veshStyle style;
+#define MESHNUMATTRS 3
+int meshAttrDims[MESHNUMATTRS] = {3, 3, 2};
+/* Several variables are needed to pass that mesh style to Vulkan. */
+int meshTotalAttrDim;
+VkPipelineVertexInputStateCreateInfo vertexInputInfo;
+VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+VkVertexInputBindingDescription meshBindingDesc;
+VkVertexInputAttributeDescription meshAttrDescs[MESHNUMATTRS];
 
-/* Here is a specific mesh with eight vertices and four triangles. The vertices 
-are packed into the vertex data array one after another. The 0th row is the 
-first vertex, the 1th row is the second, and so on. Similarly, the triangles are 
-packed into the triangle data array one after another. Each triangle consists of 
-three indices into the vertex array. */
-veshVesh vesh, vesh2;
+/* Here is a specific mesh with eight vertices and four triangles. */
+int meshNumVertsA = 8;
+const float meshVertsA[] = {
+    -0.5, -0.5, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 
+    0.5, -0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 
+    0.5, 0.5, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 
+    -0.5, 0.5, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 
+    -0.5, -0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 
+    0.5, -0.5, 0.5, 0.0, 1.0, 0.0, 1.0, 0.0, 
+    0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 1.0, 
+    -0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 0.0, 1.0
+};
+int meshNumTrisA = 4;
+const uint16_t meshTrisA[] = {
+    0, 1, 2, 
+    2, 3, 0, 
+    4, 5, 6, 
+    6, 7, 4, 
+};
+VkBuffer meshVertBufA;
+VkDeviceMemory meshVertBufMemA;
+VkBuffer meshTriBufA;
+VkDeviceMemory meshTriBufMemA;
 
+/* Here is another specific mesh with four vertices and four triangles. */
+int meshNumVertsB = 4;
+const float meshVertsB[] = {
+    1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 
+    2.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 
+    1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 
+    1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0
+};
+int meshNumTrisB = 4;
+const uint16_t meshTrisB[] = {
+    0, 2, 1, 
+    0, 1, 3, 
+    0, 3, 2, 
+    3, 1, 2, 
+};
+VkBuffer meshVertBufB;
+VkDeviceMemory meshVertBufMemB;
+VkBuffer meshTriBufB;
+VkDeviceMemory meshTriBufMemB;
 
 /* Initializes the artwork. Upon success (return code 0), don't forget to 
 finalizeArtwork later. */
 int initializeArtwork() {
-    meshMesh mesh, mesh2;
-    if (shaInitialize(&shaProg, "470vert.spv", "460frag.spv") != 0) {
-        return 8;
-    }
-    int meshAttrDims[3] = {3, 2, 3};
-    if(veshInitializeStyle(&style, 3, meshAttrDims) != 0){
-        shaFinalize(&shaProg);
+    /* New: Load the updated vertex shader. */
+    if (shaInitialize(&shaProg, "500vert.spv", "480frag.spv") != 0) {
         return 7;
     }
-    if((mesh3DInitializeBox(&mesh, 0.0, 1.0, 0.0, 0.5, 0.0, 2.0) != 0 || mesh3DInitializeSphere(&mesh2, 1, 128, 128) != 0)){
-        veshFinalize(&vesh);
-        veshFinalize(&vesh2);
+    meshGetStyle(
+        MESHNUMATTRS, meshAttrDims, &meshTotalAttrDim, &meshBindingDesc, 
+        meshAttrDescs, &vertexInputInfo, &inputAssembly);
+    if (meshInitializeVertexBuffer(
+            &meshVertBufA, &meshVertBufMemA, meshTotalAttrDim, meshNumVertsA, 
+            meshVertsA) != 0) {
         shaFinalize(&shaProg);
         return 6;
     }
-    if((veshInitializeMesh(&vesh, &mesh) != 0) || veshInitializeMesh(&vesh2, &mesh2)){
-        meshFinalize(&mesh);
-        meshFinalize(&mesh2);
-        veshFinalize(&vesh);
-        veshFinalize(&vesh2);
+    if (meshInitializeIndexBuffer(
+            &meshTriBufA, &meshTriBufMemA, meshNumTrisA, meshTrisA) != 0) {
+        meshFinalizeVertexBuffer(&meshVertBufA, &meshVertBufMemA);
         shaFinalize(&shaProg);
+        return 5;
     }
-    meshFinalize(&mesh);
-    meshFinalize(&mesh2);
+    if (meshInitializeVertexBuffer(
+            &meshVertBufB, &meshVertBufMemB, meshTotalAttrDim, meshNumVertsB, 
+            meshVertsB) != 0) {
+        meshFinalizeIndexBuffer(&meshTriBufA, &meshTriBufMemA);
+        meshFinalizeVertexBuffer(&meshVertBufA, &meshVertBufMemA);
+        shaFinalize(&shaProg);
+        return 4;
+    }
+    if (meshInitializeIndexBuffer(
+            &meshTriBufB, &meshTriBufMemB, meshNumTrisB, meshTrisB) != 0) {
+        meshFinalizeVertexBuffer(&meshVertBufB, &meshVertBufMemB);
+        meshFinalizeIndexBuffer(&meshTriBufA, &meshTriBufMemA);
+        meshFinalizeVertexBuffer(&meshVertBufA, &meshVertBufMemA);
+        shaFinalize(&shaProg);
+        return 3;
+    }
     return 0;
 }
 
 /* Releases the artwork resources. */
 void finalizeArtwork() {
-    veshFinalizeStyle(&style);
-    veshFinalize(&vesh);
-    veshFinalize(&vesh2);
+    meshFinalizeIndexBuffer(&meshTriBufB, &meshTriBufMemB);
+    meshFinalizeVertexBuffer(&meshVertBufB, &meshVertBufMemB);
+    meshFinalizeIndexBuffer(&meshTriBufA, &meshTriBufMemA);
+    meshFinalizeVertexBuffer(&meshVertBufA, &meshVertBufMemA);
     shaFinalize(&shaProg);
+}
+
+
+
+/*** UNIFORM PART OF CONNECTION BETWEEN SWAP CHAIN AND SCENE ******************/
+
+typedef struct SceneUniforms SceneUniforms;
+struct SceneUniforms {
+    float color[4];
+    float cameraT[4][4];
+};
+
+VkBuffer *sceneUniformBuffers;
+VkDeviceMemory *sceneUniformBuffersMemory;
+
+/* Called by presentFrame. Copies a UBO from the CPU side to the GPU side, so 
+that the shaders can access its contents. */
+void setSceneUniforms(uint32_t imageIndex) {
+    float soFarTime = gui.currentTime - gui.startTime;
+    SceneUniforms sceneUnifs;
+    /* Set the color member of the scene uniforms. */
+    sceneUnifs.color[0] = 1.0;
+    sceneUnifs.color[1] = 1.0;
+    sceneUnifs.color[2] = 1.0;
+    sceneUnifs.color[3] = 1.0;
+    /* Here's the camera matrix from our previous vertex shader. */  
+    float previous[4][4] = {
+        {3.700123, -0.487130, 0.000000, 0.000000},      // row 0, not column 0
+        {-0.344453, -2.616382, -2.638959, 0.000004},    // row 1
+        {0.093228, 0.708139, -0.714249, 9.090910},      // row 2
+        {0.092296, 0.701057, -0.707107, 10.000000}};    // row 3
+    /* Here's a rotation that we can animate, to revolve the camera about its 
+    target. */
+    float rotation[4][4] = {
+        {cos(soFarTime), -sin(soFarTime), 0.0, 0.0},    // row 0, not column 0
+        {sin(soFarTime), cos(soFarTime), 0.0, 0.0},     // row 1
+        {0.0, 0.0, 1.0, 0.0},                           // row 2
+        {0.0, 0.0, 0.0, 1.0}};                          // row 3
+    /* The overall camera matrix is the matrix product of those two. */
+    float camera[4][4];
+    for (int i = 0; i < 4; i += 1)
+        for (int j = 0; j < 4; j += 1) {
+            camera[i][j] = 0.0;
+            for (int k = 0; k < 4; k += 1)
+                camera[i][j] += previous[i][k] * rotation[k][j];
+        }
+    /* Transpose that camera matrix into the scene UBO. */
+    for (int i = 0; i < 4; i += 1)
+        for (int j = 0; j < 4; j += 1)
+            sceneUnifs.cameraT[i][j] = camera[j][i];
+	/* Copy the scene UBO bits from the CPU to the GPU. */
+	void *data;
+	vkMapMemory(
+	    vul.device, sceneUniformBuffersMemory[imageIndex], 0, 
+	    sizeof(sceneUnifs), 0, &data);
+	memcpy(data, &sceneUnifs, sizeof(sceneUnifs));
+	vkUnmapMemory(vul.device, sceneUniformBuffersMemory[imageIndex]);
+}
+
+/* New: This data structure holds our body-specific uniforms. Don't forget to 
+transpose the modeling matrix when you copy it into here. */
+typedef struct BodyUniforms BodyUniforms;
+struct BodyUniforms {
+    float modelingT[4][4];
+};
+
+/* New: GPU-side buffers for body-specific uniforms. And a body count (which 
+should really be in the artwork section above?). And a CPU-side buffer that 
+is aware of the alignment rules of the GPU. */
+VkBuffer *bodyUniformBuffers;
+VkDeviceMemory *bodyUniformBuffersMemory;
+int bodyNum = 2;
+unifAligned aligned;
+isoIsometry iso1, iso2;
+/* New: Configures the body uniforms for a single frame. */
+void setBodyUniforms(uint32_t imageIndex) {
+    float soFarTime = gui.currentTime - gui.startTime, rot[3][3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}, translationA[3] = {0.0, 0.0, 0.0}, translationB[3] = {0.0, 0.0, 0.0}, invHomog1[4][4], invHomog2[4][4], transposed1[4][4];
+    /* Place a trivial isometry into the first body's modeling matrix. */
+    BodyUniforms *bodyUnifs = (BodyUniforms *)unifGetAligned(&aligned, 0);
+    translationA[0] = fabs(sin(soFarTime));
+    translationB[0] = -fabs(sin(soFarTime));
+    isoSetRotation(&iso1, rot);
+    isoSetTranslation(&iso1, translationA);
+    isoGetInverseHomogeneous(&iso1, invHomog1);
+    mat44Transpose(invHomog1,  bodyUnifs->modelingT);
+    /* Place a (transposed) rotation into the second body's modeling matrix. */
+    bodyUnifs = (BodyUniforms *)unifGetAligned(&aligned, 1);
+    isoSetRotation(&iso2, rot);
+    isoSetTranslation(&iso2, translationB);
+    isoGetInverseHomogeneous(&iso2, invHomog2);
+    mat44Transpose(invHomog2, bodyUnifs->modelingT);
+    void *data;
+    int amount = aligned.uboNum * aligned.alignedSize;
+	vkMapMemory(
+	    vul.device, bodyUniformBuffersMemory[imageIndex], 0, amount, 0, &data);
+	memcpy(data, aligned.data, amount);
+	vkUnmapMemory(vul.device, bodyUniformBuffersMemory[imageIndex]);
+}
+
+/* New: Now we have two uniforms to describe. The new uniform is dynamic, which 
+for us basically means per-body. We make it available to the vertex shader only, 
+and we bind it to 'binding = 1' there. */
+#define UNIFSCENE 0
+#define UNIFBODY 1
+#define UNIFNUM 2
+int descriptorCounts[UNIFNUM] = {1, 1};
+VkDescriptorType descriptorTypes[UNIFNUM] = {
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC};
+VkShaderStageFlags descriptorStageFlagss[UNIFNUM] = {
+    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 
+    VK_SHADER_STAGE_VERTEX_BIT};
+int descriptorBindings[UNIFNUM] = {0, 1};
+
+descDescription desc;
+
+/* Helper function for descInitialize. Provides the parts of the customization 
+that are difficult to abstract. The i argument specifies which element of the 
+swap chain we're operating on. */
+void setDescriptorSet(descDescription *desc, int i) {
+    /* Update the descriptor for the scene UBO. */
+    VkDescriptorBufferInfo sceneUBOInfo = {0};
+    sceneUBOInfo.buffer = sceneUniformBuffers[i];
+    sceneUBOInfo.offset = 0;
+    sceneUBOInfo.range = sizeof(SceneUniforms);
+    VkDescriptorBufferInfo sceneUBODescBufInfos[] = {sceneUBOInfo};
+    VkWriteDescriptorSet sceneUBOWrite = {0};
+    sceneUBOWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    sceneUBOWrite.dstSet = desc->descriptorSets[i];
+    sceneUBOWrite.dstBinding = descriptorBindings[UNIFSCENE];
+    sceneUBOWrite.dstArrayElement = 0;
+    sceneUBOWrite.descriptorType = descriptorTypes[UNIFSCENE];
+    sceneUBOWrite.descriptorCount = descriptorCounts[UNIFSCENE];
+    sceneUBOWrite.pBufferInfo = sceneUBODescBufInfos;
+    /* New: Update the descriptor for the body UBO. */
+    VkDescriptorBufferInfo bodyUBOInfo = {0};
+    bodyUBOInfo.buffer = bodyUniformBuffers[i];
+    bodyUBOInfo.offset = 0;
+    bodyUBOInfo.range = unifAlignment(sizeof(BodyUniforms));
+    VkDescriptorBufferInfo bodyUBODescBufInfos[] = {bodyUBOInfo};
+    VkWriteDescriptorSet bodyUBOWrite = {0};
+    bodyUBOWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    bodyUBOWrite.dstSet = desc->descriptorSets[i];
+    bodyUBOWrite.dstBinding = descriptorBindings[UNIFBODY];
+    bodyUBOWrite.dstArrayElement = 0;
+    bodyUBOWrite.descriptorCount = descriptorCounts[UNIFBODY];
+    bodyUBOWrite.descriptorType = descriptorTypes[UNIFBODY];
+    bodyUBOWrite.pBufferInfo = bodyUBODescBufInfos;
+    /* New: We now have two descriptors to update. */
+    VkWriteDescriptorSet descWrites[] = {sceneUBOWrite, bodyUBOWrite};
+    vkUpdateDescriptorSets(vul.device, 2, descWrites, 0, NULL);
+}
+
+/* Initializes all of the machinery for communicating uniforms to shaders. 
+Returns an error code (0 on success). On success, don't forget to 
+finalizeUniforms when you're done. */
+int initializeUniforms() {
+    if (unifInitializeBuffers(
+            &sceneUniformBuffers, &sceneUniformBuffersMemory, 
+            sizeof(SceneUniforms)) != 0)
+        return 4;
+    /* New: Initialize buffers to hold the body uniforms on the GPU. */
+    if (unifInitializeBuffers(
+            &bodyUniformBuffers, &bodyUniformBuffersMemory, 
+            bodyNum * unifAlignment(sizeof(BodyUniforms))) != 0) {
+        unifFinalizeBuffers(&sceneUniformBuffers, &sceneUniformBuffersMemory);
+        return 3;
+    }
+    /* New: Initialize buffers to hold the body uniforms on the CPU. */
+    if (unifInitializeAligned(&aligned, bodyNum, sizeof(BodyUniforms)) != 0) {
+        unifFinalizeBuffers(&bodyUniformBuffers, &bodyUniformBuffersMemory);
+        unifFinalizeBuffers(&sceneUniformBuffers, &sceneUniformBuffersMemory);
+        return 2;
+    }
+    if (descInitialize(
+            &desc, UNIFNUM, descriptorCounts, descriptorTypes, 
+            descriptorStageFlagss, descriptorBindings, setDescriptorSet) != 0) {
+        unifFinalizeAligned(&aligned);
+        unifFinalizeBuffers(&bodyUniformBuffers, &bodyUniformBuffersMemory);
+        unifFinalizeBuffers(&sceneUniformBuffers, &sceneUniformBuffersMemory);
+        return 1;
+    }
+    return 0;
+}
+
+/* Releases the resources backing all of the uniform machinery. */
+void finalizeUniforms() {
+    descFinalize(&desc);
+    /* New: Finalize the buffers to hold the body uniforms. */
+    unifFinalizeAligned(&aligned);
+    unifFinalizeBuffers(&bodyUniformBuffers, &bodyUniformBuffersMemory);
+    unifFinalizeBuffers(&sceneUniformBuffers, &sceneUniformBuffersMemory);
 }
 
 
 
 /*** CONNECTION BETWEEN SWAP CHAIN AND SCENE **********************************/
 
-/* New: This entire section, where we build the connection between the swap 
-chain and the scene (artwork, etc.). At this point there are two pieces of 
-machinery: the pipeline and the command buffers. */
 VkPipelineLayout connPipelineLayout;
 VkPipeline connGraphicsPipeline;
-/* This dynamically allocated array has length swap.numImages. */
 VkCommandBuffer *connCommandBuffers;
 
 /* Helper function for initializePipeline. Configures viewport and scissor. (We 
@@ -300,8 +546,8 @@ int initializePipeline(
     /* Pipeline layout and pipeline. */
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {0};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pSetLayouts = NULL;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &(desc.descriptorSetLayout);
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = NULL;
     if (vkCreatePipelineLayout(
@@ -325,7 +571,7 @@ int initializePipeline(
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
-    /* Here the arguments about artwork get used. */
+    /* Here the arguments about mesh style and shader program get used. */
     pipelineInfo.pStages = shaProg->shaderStages;
     pipelineInfo.pVertexInputState = vertexInputInfo;
     pipelineInfo.pInputAssemblyState = inputAssembly;
@@ -398,9 +644,39 @@ int initializeCommandBuffers() {
         vkCmdBindPipeline(
             connCommandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, 
             connGraphicsPipeline);
+        /* New: At the end of the call to bind the descriptor set, we pass along 
+        one offset into the body UBO. To clarify, the body UBO contains data for 
+        all of the bodies. What's really specific to one body versus another is 
+        this offset right here. */
+        uint32_t bodyUBOOffset = 0;
+        vkCmdBindDescriptorSets(
+            connCommandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, 
+            connPipelineLayout, 0, 1, &(desc.descriptorSets[i]), 1, 
+            &bodyUBOOffset);
         /* Render a mesh. */
-        veshRender(&vesh, connCommandBuffers[i]);
-        veshRender(&vesh2, connCommandBuffers[i]);
+        VkDeviceSize offsets[] = {0};
+        VkBuffer vertexBuffers[] = {meshVertBufA};
+        vkCmdBindVertexBuffers(
+            connCommandBuffers[i], 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(
+            connCommandBuffers[i], meshTriBufA, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdDrawIndexed(
+            connCommandBuffers[i], (uint32_t)(meshNumTrisA * 3), 1, 0, 0, 0);
+        /* New: We again pass an offset into the body UBO, incremented to 
+        indicate the next body. */
+        bodyUBOOffset += unifAlignment(sizeof(BodyUniforms));
+        vkCmdBindDescriptorSets(
+            connCommandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, 
+            connPipelineLayout, 0, 1, &(desc.descriptorSets[i]), 1, 
+            &bodyUBOOffset);
+        /* Render another mesh. */
+        vertexBuffers[0] = meshVertBufB;
+        vkCmdBindVertexBuffers(
+            connCommandBuffers[i], 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(
+            connCommandBuffers[i], meshTriBufB, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdDrawIndexed(
+            connCommandBuffers[i], (uint32_t)(meshNumTrisB * 3), 1, 0, 0, 0);
         /* End render pass and command buffer. */
         vkCmdEndRenderPass(connCommandBuffers[i]);
         if (vkEndCommandBuffer(connCommandBuffers[i]) != VK_SUCCESS) {
@@ -425,10 +701,15 @@ void finalizeCommandBuffers() {
 an error code (0 on success). On success, don't forget to finalizeConnection 
 when you're done. */
 int initializeConnection() {
-    if (initializePipeline(&shaProg, &style.vertexInputInfo, &style.inputAssembly) != 0)
+    if (initializeUniforms() != 0)
+        return 3;
+    if (initializePipeline(&shaProg, &vertexInputInfo, &inputAssembly) != 0) {
+        finalizeUniforms();
         return 2;
+    }
     if (initializeCommandBuffers() != 0) {
         finalizePipeline();
+        finalizeUniforms();
         return 1;
     }
     return 0;
@@ -438,6 +719,7 @@ int initializeConnection() {
 void finalizeConnection() {
     finalizeCommandBuffers();
     finalizePipeline();
+    finalizeUniforms();
 }
 
 
@@ -454,12 +736,10 @@ int reinitializeSwapChain() {
         glfwWaitEvents();
     }
     vkDeviceWaitIdle(vul.device);
-    /* New: Release the connection before releasing the swap chain. */
     finalizeConnection();
     swapFinalize(&swap);
     if (swapInitialize(&swap) != 0)
         return 2;
-    /* New: Create the connection after creating the swap chain. */
     if (initializeConnection() != 0) {
         swapFinalize(&swap);
         return 1;
@@ -492,6 +772,9 @@ int presentFrame() {
         vkWaitForFences(
             vul.device, 1, &swap.imagesInFlight[imageIndex], VK_TRUE, 
             UINT64_MAX);
+    /* New: Send data to the scene and body UBOs in the shaders. */
+    setSceneUniforms(imageIndex);
+    setBodyUniforms(imageIndex);
     /* Prepare to submit a request to render the new frame. */
     VkSubmitInfo submitInfo = {0};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -501,7 +784,6 @@ int presentFrame() {
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
-    /* New: We now have one command buffer instead of zero command buffers. */
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &connCommandBuffers[imageIndex];
     /* Synchronization. */
@@ -561,7 +843,6 @@ int main() {
         guiFinalize(&gui);
         return 2;
     }
-    /* New: Initialize the connection after the swap chain and scene. */
     if (initializeConnection() != 0) {
         finalizeArtwork();
         swapFinalize(&swap);
@@ -572,7 +853,6 @@ int main() {
     guiSetFramePresenter(&gui, presentFrame);
     guiRun(&gui);
     vkDeviceWaitIdle(vul.device);
-    /* New: Finalize the connection before the scene and swap chain. */
     finalizeConnection();
     finalizeArtwork();
     swapFinalize(&swap);

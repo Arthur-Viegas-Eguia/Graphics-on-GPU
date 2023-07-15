@@ -362,7 +362,7 @@ shaProgram shaProg;
 finalizeArtwork later. */
 int initializeArtwork() {
     /* New: New shaders and new helper functions. */
-    if (shaInitialize(&shaProg, "570vert.spv", "570frag.spv") != 0) {
+    if (shaInitialize(&shaProg, "590vert.spv", "590frag.spv") != 0) {
         return 5;
     }
     int attrDims[3] = {3, 2, 3};
@@ -411,6 +411,9 @@ struct SceneUniforms {
     float cameraT[4][4];
     float uLight[4];
     float cLight[4];
+    float pLight[4];
+    float cLight2[4];
+    float cDiffuse[4];
 };
 
 VkBuffer *sceneUniformBuffers;
@@ -421,8 +424,21 @@ void setSceneUniforms(uint32_t imageIndex) {
     SceneUniforms sceneUnifs;
     float uLight[3] = {1.0/sqrt(3.0),1.0/sqrt(3.0),1.0/sqrt(3.0)};
     vecCopy(3, uLight, sceneUnifs.uLight);
-    float cLight[3] = {1, 1, 1};
+    float cLight[3] = {1.0, 0.0, 0.0}, cLight2[3] = {0.0, 0.0, 1.0};
     vecCopy(3, cLight, sceneUnifs.cLight);
+    vecCopy(3, cLight2, sceneUnifs.cLight2);
+    float cDiffuse[3] = {0.25, 0.25, 0.25};
+    vecCopy(3, cDiffuse, sceneUnifs.cDiffuse);
+
+    sceneUnifs.pLight[0] = 0.0;
+    sceneUnifs.pLight[1] = 0.0;
+
+    if(landData[0] + 1 > waterData[0] + 1){
+        sceneUnifs.pLight[2] = landData[0] + 1;
+    }
+    else{
+        sceneUnifs.pLight[2] = waterData[0] + 1;
+    }
     /* New: Update the camera. */
     setCamera();
     float cam[4][4];

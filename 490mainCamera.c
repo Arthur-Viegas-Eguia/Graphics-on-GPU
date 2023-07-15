@@ -231,16 +231,16 @@ void handleKey(
 			camSetProjectionType(&camera, camORTHOGRAPHIC);
 	}
     if(key == GLFW_KEY_RIGHT){
-		theta += 0.01;
-	}
-	if(key == GLFW_KEY_LEFT){
-		theta -= 0.01;
-	}
-	if(key == GLFW_KEY_L){
 		phi += 0.01;
 	}
-	if(key == GLFW_KEY_J){
+	if(key == GLFW_KEY_LEFT){
 		phi -= 0.01;
+	}
+	if(key == GLFW_KEY_L){
+		theta += 0.01;
+	}
+	if(key == GLFW_KEY_J){
+		theta -= 0.01;
 	}
 	if(key == GLFW_KEY_UP){
 		rho += 0.1;

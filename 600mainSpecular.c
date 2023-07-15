@@ -106,6 +106,7 @@ typedef struct BodyUniforms BodyUniforms;
 struct BodyUniforms {
     float modelingT[4][4];
     uint32_t texIndices[4];
+    float cSpecular[4];
 };
 
 #include "560body.c"
@@ -328,8 +329,8 @@ bodyBody body1, body2, body3, head, eye1, eye2;
 they get updated on each time step automatically. */
 int initializeScene() {
     float headVec[3] = {2.0, 0.35, 1.3}, eye1Vec[3] = {0.23, 0.15, 0.20}, eye2Vec[3] = {0.23, -0.15, 0.20};
-    bodyConfigure(&body1, &landVesh, NULL, &body2);
     bodyConfigure(&body2, &waterVesh, NULL, NULL);
+    bodyConfigure(&body1, &landVesh, NULL, &body2);
     bodyConfigure(&body3, &heroVesh, NULL, &body1);
     bodyConfigure(&head, &heroHead, NULL, NULL);
     bodyConfigure(&eye1, &heroEye1, NULL, NULL);
@@ -343,6 +344,14 @@ int initializeScene() {
     head.uniforms.texIndices[0] = 1;
     eye1.uniforms.texIndices[0] = 0;
     eye2.uniforms.texIndices[0] = 0;
+    float white[3] = {1.0, 1.0, 1.0}, black[3] = {0.0, 0.0, 0.0};
+    vecCopy(3, black, body1.uniforms.cSpecular);
+    vecCopy(3, white, body2.uniforms.cSpecular);
+    vecCopy(3, white, body3.uniforms.cSpecular);
+    vecCopy(3, white, head.uniforms.cSpecular);
+    vecCopy(3, white, eye1.uniforms.cSpecular);
+    vecCopy(3, white, eye2.uniforms.cSpecular);
+
     isoSetTranslation(&(head.isometry), headVec);
     isoSetTranslation(&(eye1.isometry), eye1Vec);
     isoSetTranslation(&(eye2.isometry), eye2Vec);
@@ -362,7 +371,7 @@ shaProgram shaProg;
 finalizeArtwork later. */
 int initializeArtwork() {
     /* New: New shaders and new helper functions. */
-    if (shaInitialize(&shaProg, "570vert.spv", "570frag.spv") != 0) {
+    if (shaInitialize(&shaProg, "600vert.spv", "600frag.spv") != 0) {
         return 5;
     }
     int attrDims[3] = {3, 2, 3};
@@ -411,6 +420,10 @@ struct SceneUniforms {
     float cameraT[4][4];
     float uLight[4];
     float cLight[4];
+    float pLight[4];
+    float cLight2[4];
+    float cDiffuse[4];
+    float pCamera[4];
 };
 
 VkBuffer *sceneUniformBuffers;
@@ -421,8 +434,22 @@ void setSceneUniforms(uint32_t imageIndex) {
     SceneUniforms sceneUnifs;
     float uLight[3] = {1.0/sqrt(3.0),1.0/sqrt(3.0),1.0/sqrt(3.0)};
     vecCopy(3, uLight, sceneUnifs.uLight);
-    float cLight[3] = {1, 1, 1};
+    float cLight[3] = {1.0, 1.0, 1.0}, cLight2[3] = {0.0, 0.0, 0.0};
     vecCopy(3, cLight, sceneUnifs.cLight);
+    vecCopy(3, cLight2, sceneUnifs.cLight2);
+    float cDiffuse[3] = {0.25, 0.25, 0.25};
+    vecCopy(3, cDiffuse, sceneUnifs.cDiffuse);
+    vecCopy(3, camera.isometry.translation, sceneUnifs.pCamera);
+    
+    sceneUnifs.pLight[0] = 0.0;
+    sceneUnifs.pLight[1] = 0.0;
+
+    if(landData[0] + 1 > waterData[0] + 1){
+        sceneUnifs.pLight[2] = landData[0] + 1;
+    }
+    else{
+        sceneUnifs.pLight[2] = waterData[0] + 1;
+    }
     /* New: Update the camera. */
     setCamera();
     float cam[4][4];
