@@ -3,11 +3,11 @@ Project developed for CS-311 Computer Graphics taught by Josh Davis at Carleton 
 This is the implementation of computer graphics on a GPU using Vulkan written for CS 311 Computer Graphics, taught By Josh Davis.
 More than running computer graphics on the GPU, this project also contains shaders in the OpenGL language, scene-wide and body specific uniforms, scene graphs, lighting using the Phong Illumination Model.
 
-To run just use `glslc 600shader.vert -o 600vert.spv
+To run just use ```glslc 600shader.vert -o 600vert.spv
                  glslc 600shader.frag -o 600frag.spv
-                 clang 600mainSpecular.c -lglfw -lvulkan` on Mac and `/mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 600shader.vert -o 600vert.spv
+                 clang 600mainSpecular.c -lglfw -lvulkan``` on Mac and ```/mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 600shader.vert -o 600vert.spv
                                                                       /mnt/c/VulkanSDK/1.3.216.0/Bin/glslc.exe 600shader.frag -o 600frag.spv
-                                                                      clang 600mainSpecular.c -lglfw -lvulkan` on Linux. You might need to change the 1.3.216 to the version of Vulkan running on your computer.
+                                                                      clang 600mainSpecular.c -lglfw -lvulkan``` on Linux. You might need to change the 1.3.216 to the version of Vulkan running on your computer.
 
                                                                       To move the character, use W,A,S,D
 
